@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>PokéDex Explorer</title>
+<style>
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;min-height:100%;font-family:system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;background:#07111f;color:#fff}
+body{display:flex;justify-content:center}
+#app{width:min(520px,100%);min-height:100vh;padding:18px 14px 35px;background:linear-gradient(160deg,#07152a,#102d43 55%,#06101d)}
+.brand{text-align:center;color:#62eaff;font-size:10px;font-weight:1000;letter-spacing:3px}
+h1{text-align:center;margin:4px 0;font-size:34px}.sub{text-align:center;color:#9eb9c8;font-size:12px}
+.search{display:flex;gap:7px;margin:16px 0}.search input{flex:1;min-width:0;padding:13px;border-radius:13px;border:1px solid #315c72;background:#04101b;color:#fff;font-size:16px}
+.search button,.back{border:0;border-radius:13px;padding:12px 15px;background:#54eaff;color:#03121a;font-weight:1000}
+.status{text-align:center;color:#8da8b7;font-size:12px;min-height:20px}
+.dex{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-top:12px}
+.poke{border:1px solid #28516a;border-radius:17px;background:#0b2030;color:#fff;padding:10px;text-align:left}
+.poke img{width:100%;height:130px;object-fit:contain;background:#071625;border-radius:13px}
+.num{color:#65eaff;font-size:10px;font-weight:900}.pname{text-transform:capitalize;font-weight:1000;font-size:17px}
+.detail{margin-top:12px}.hero{display:flex;align-items:center;gap:12px}.hero img{width:150px;height:150px;object-fit:contain;background:#0b2030;border-radius:18px}
+.name{font-size:29px;font-weight:1000;text-transform:capitalize}.types{display:flex;gap:6px;flex-wrap:wrap;margin-top:7px}
+.type,.chip{padding:6px 9px;border-radius:10px;background:#17364a;font-size:11px;font-weight:900;text-transform:capitalize}.chip{display:inline-block;margin:3px}
+.weak .chip{background:#3a2026}.strong .chip{background:#18352b}
+.section{margin-top:14px;padding:14px;border:1px solid #28516a;border-radius:17px;background:#071625cc}.section h2{font-size:15px;margin:0 0 9px}
+.stats{display:grid;gap:7px}.stat{display:grid;grid-template-columns:78px 1fr 30px;gap:6px;align-items:center;font-size:10px;text-transform:capitalize}
+.bar{height:7px;background:#0a1b29;border-radius:99px;overflow:hidden}.bar i{display:block;height:100%;background:#54eaff}
+.evo{display:flex;align-items:center;justify-content:center;flex-wrap:wrap;gap:7px}.evo img{width:80px;height:80px;object-fit:contain}
+.evo div{text-align:center;font-size:11px;text-transform:capitalize}.arrow{font-size:18px;color:#62eaff}
+.back{margin-bottom:10px;background:#10283a;color:#dffaff;border:1px solid #28516a}.load{grid-column:1/-1;text-align:center;color:#7895a5;padding:20px}
+.fav{width:100%;margin-top:12px;padding:12px;border-radius:12px;border:1px solid #28516a;background:#10283a;color:#fff;font-weight:1000}
+.fav.on{background:#59491b}.hidden{display:none}.error{color:#ff9ba5}
+@media(max-width:350px){.poke img{height:110px}.hero img{width:125px;height:125px}.name{font-size:25px}}
+</style>
+</head>
+<body>
+<main id="app">
+<div class="brand">PHOENIX BY GAMES</div>
+<h1>POKÉDEX EXPLORER</h1>
+<div class="sub">Browse every Pokémon or search by name or number.</div>
+<form class="search" id="form"><input id="q" autocomplete="off" placeholder="Search name or number"><button>SEARCH</button></form>
+<div class="status" id="status">Loading Pokédex…</div>
+<section id="list" class="dex"></section>
+<section id="detail" class="detail hidden"></section>
+</main>
+<script>
+const API='https://pokeapi.co/api/v2/';
+const list=document.getElementById('list'),detail=document.getElementById('detail'),status=document.getElementById('status'),q=document.getElementById('q');
+let cache=[],offset=0,loading=false,searchMode=false,selectedId=null,selectedScroll=0;
+
+const esc=s=>String(s).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#039;'}[c]));
+const cap=s=>s.replace(/-/g,' ').replace(/\b\w/g,c=>c.toUpperCase());
+async function get(u){const r=await fetch(API+u);if(!r.ok)throw new Error('request failed');return r.json()}
+function img(p){return p?.sprites?.other?.['official-artwork']?.front_default||p?.sprites?.front_default||''}
+
+async function loadMore(){
+ if(loading||searchMode)return;
+ loading=true;
+ const oldMore=document.getElementById('more'); if(oldMore)oldMore.remove();
+ const marker=document.createElement('div');marker.className='load';marker.id='more';marker.textContent='Loading more Pokémon…';list.appendChild(marker);
+ try{
+  const d=await get(`pokemon?limit=60&offset=${offset}`);
+  const batch=await Promise.all(d.results.map(x=>get('pokemon/'+x.name)));
+  cache.push(...batch);offset+=60;status.textContent=`Showing ${cache.length} of ${d.count} Pokémon`;
+  renderList(cache);
+ }catch(e){status.textContent='Could not load more Pokémon. Check your internet connection.'}
+ loading=false;
+}
+
+function renderList(items){
+ list.innerHTML='';
+ detail.classList.add('hidden');list.classList.remove('hidden');
+ items.forEach(p=>{
+  const b=document.createElement('button');b.type='button';b.className='poke';b.dataset.id=p.id;
+  b.innerHTML=`<img loading="lazy" src="${img(p)}" alt="${esc(p.name)}"><div class="num">#${String(p.id).padStart(4,'0')}</div><div class="pname">${esc(p.name)}</div>`;
+  b.addEventListener('click',()=>openPokemon(p));
+  list.appendChild(b);
+ });
+ if(!searchMode){
+  const more=document.createElement('div');more.className='load';more.id='more';
+  more.textContent=cache.length<1025?'Scroll down to load more…':'All Pokémon loaded';
+  list.appendChild(more);
+ }
+}
+
+async function openPokemon(p){
+ // Capture exact position BEFORE hiding the list.
+ selectedId=p.id;
+ selectedScroll=window.scrollY;
+ list.classList.add('hidden');
+ detail.classList.remove('hidden');
+ detail.innerHTML='<button type="button" class="back" id="back">← BACK TO POKÉDEX</button><div class="section load">Loading details…</div>';
+ window.scrollTo(0,0);
+ try{
+  const species=await get('pokemon-species/'+p.id);
+  const chain=await get(species.evolution_chain.url.replace(API,''));
+  const types=await Promise.all(p.types.map(t=>get('type/'+t.type.name)));
+  const strong=[...new Set(types.flatMap(t=>t.damage_relations.double_damage_to.map(x=>x.name)))];
+  const weak=[...new Set(types.flatMap(t=>t.damage_relations.double_damage_from.map(x=>x.name)))];
+  const immune=[...new Set(types.flatMap(t=>t.damage_relations.no_damage_from.map(x=>x.name)))];
+  const chainNames=[];
+  (function walk(x){chainNames.push(x.species.name);x.evolves_to.forEach(walk)})(chain.chain);
+  const evo=await Promise.all(chainNames.map(n=>get('pokemon/'+n)));
+
+  detail.innerHTML=`
+  <button type="button" class="back" id="back">← BACK TO POKÉDEX</button>
+  <div class="section">
+   <div class="hero"><img src="${img(p)}" alt="${esc(p.name)}"><div>
+    <div class="num">#${String(p.id).padStart(4,'0')}</div><div class="name">${esc(p.name)}</div>
+    <div class="types">${p.types.map(t=>`<span class="type">${esc(t.type.name)}</span>`).join('')}</div>
+   </div></div>
+   <button type="button" class="fav" id="fav">☆ FAVOURITE</button>
+  </div>
+  <div class="section"><h2>💪 Strong against</h2><div class="strong">${strong.map(x=>`<span class="chip">${esc(x)}</span>`).join('')||'—'}</div>
+   <h2>⚠️ Weak against</h2><div class="weak">${weak.map(x=>`<span class="chip">${esc(x)}</span>`).join('')||'—'}</div>
+   <h2>🛡️ Immune to</h2><div>${immune.map(x=>`<span class="chip">${esc(x)}</span>`).join('')||'—'}</div>
+  </div>
+  <div class="section"><h2>🔄 Evolution</h2><div class="evo">${evo.map((x,i)=>`${i?'<span class="arrow">→</span>':''}<div><img src="${img(x)}" alt="${esc(x.name)}"><br>${esc(x.name)}</div>`).join('')}</div></div>
+  <div class="section"><h2>📊 Base stats</h2><div class="stats">${p.stats.map(s=>`<div class="stat"><span>${cap(s.stat.name)}</span><div class="bar"><i style="width:${Math.min(100,s.base_stat/2.55)}%"></i></div><b>${s.base_stat}</b></div>`).join('')}</div></div>
+  <div class="section"><h2>ℹ️ Details</h2><div class="types"><span class="chip">Height ${(p.height/10).toFixed(1)} m</span><span class="chip">Weight ${(p.weight/10).toFixed(1)} kg</span><span class="chip">${cap(species.generation.name)}</span></div></div>`;
+
+  document.getElementById('back').addEventListener('click',backToDex);
+  document.getElementById('fav').addEventListener('click',e=>{
+   e.currentTarget.classList.toggle('on');
+   e.currentTarget.textContent=e.currentTarget.classList.contains('on')?'★ FAVOURITED':'☆ FAVOURITE';
+  });
+ }catch(e){
+  detail.innerHTML='<button type="button" class="back" id="back">← BACK TO POKÉDEX</button><div class="section error">The Pokémon details could not be loaded. You can press Back and try again.</div>';
+  document.getElementById('back').addEventListener('click',backToDex);
+ }
+}
+
+function backToDex(){
+ detail.classList.add('hidden');list.classList.remove('hidden');searchMode=false;renderList(cache);
+ requestAnimationFrame(()=>requestAnimationFrame(()=>{
+  const target=document.querySelector(`.poke[data-id="${selectedId}"]`);
+  if(target){target.scrollIntoView({block:'center',behavior:'auto'});}
+  else window.scrollTo(0,selectedScroll);
+ }));
+}
+
+document.getElementById('form').addEventListener('submit',async e=>{
+ e.preventDefault();const s=q.value.trim().toLowerCase();
+ if(!s){searchMode=false;renderList(cache);return}
+ searchMode=true;status.textContent='Searching…';
+ const found=cache.filter(p=>p.name.includes(s)||String(p.id)===s);
+ if(found.length){renderList(found);return}
+ try{const p=await get('pokemon/'+encodeURIComponent(s));openPokemon(p)}
+ catch(err){list.classList.remove('hidden');detail.classList.add('hidden');list.innerHTML='<div class="load error">No Pokémon found.</div>'}
+});
+window.addEventListener('scroll',()=>{if(!searchMode&&!detail.classList.contains('hidden'))return;if(!searchMode&&window.innerHeight+window.scrollY>=document.body.offsetHeight-700)loadMore();});
+loadMore();
+</script>
+</body>
+</html>
